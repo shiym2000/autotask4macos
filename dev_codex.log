@@ -136,3 +136,9 @@
 - 新任务启动时写入远端完成标记文件，记录退出码。
 - 刷新任务状态时优先读取完成标记，避免 tmux 留存导致一直显示 running。
 - 旧任务会兼容检测 tmux pane 中的完成提示并标记为 finished。
+
+## 2026-04-16 23:00 - Runner 状态刷新误判修正
+
+- 只有 tmux 明确报告 session 不存在时才标记 stopped。
+- SSH 失败、超时或权限错误不再把 running 任务误改成 stopped。
+- stopped 记录如果远端 session 仍存在，会在刷新时恢复为 running 或 finished。

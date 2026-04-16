@@ -420,7 +420,7 @@ async def fetch_process_users(host: HostConfig, pids: list[str]) -> dict[str, st
 
 
 async def refresh_task_status(task: dict[str, Any]) -> None:
-    if task.get("status") != "running":
+    if task.get("status") not in {"running", "stopped"}:
         return
     host = str(task.get("host", ""))
     session = str(task.get("session", ""))
@@ -432,9 +432,15 @@ async def refresh_task_status(task: dict[str, Any]) -> None:
             task["exit_code"] = stdout.strip().splitlines()[-1] if stdout.strip() else "0"
             task["updated_at"] = time.time()
             return
-    code, _, _ = await run_ssh(host, f"tmux has-session -t {shlex.quote(session)}", timeout=CONNECT_TIMEOUT)
+    code, stdout, stderr = await run_ssh(host, f"tmux has-session -t {shlex.quote(session)}", timeout=CONNECT_TIMEOUT)
     if code != 0:
-        task["status"] = "stopped"
+        message = f"{stdout}\n{stderr}".lower()
+        if "can't find session" in message or "no server running" in message:
+            task["status"] = "stopped"
+            task["updated_at"] = time.time()
+        else:
+            task["last_error"] = (stderr.strip() or stdout.strip() or "任务状态刷新失败")
+        return
     else:
         capture_code, stdout, _ = await run_ssh(host, f"tmux capture-pane -pt {shlex.quote(session)} -S -80", timeout=CONNECT_TIMEOUT)
         task["status"] = "finished" if capture_code == 0 and "[autotask] 程序已结束" in stdout else "running"
