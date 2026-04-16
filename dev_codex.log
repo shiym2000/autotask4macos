@@ -142,3 +142,9 @@
 - 只有 tmux 明确报告 session 不存在时才标记 stopped。
 - SSH 失败、超时或权限错误不再把 running 任务误改成 stopped。
 - stopped 记录如果远端 session 仍存在，会在刷新时恢复为 running 或 finished。
+
+## 2026-04-16 23:15 - Runner 状态名称简化
+
+- 页面任务状态统一显示为 Running、Completed 和 Interrupted。
+- 后端正常完成状态改为 completed。
+- 启动失败、session 缺失、删除 tmux 和手动终止统一归为 interrupted。

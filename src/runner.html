@@ -177,8 +177,8 @@
       overflow-wrap: normal;
     }
     .status-running { color: var(--good); font-weight: 700; }
-    .status-stopped { color: var(--muted); font-weight: 700; }
-    .status-failed { color: var(--bad); font-weight: 700; }
+    .status-completed { color: var(--muted); font-weight: 700; }
+    .status-interrupted { color: var(--bad); font-weight: 700; }
     .task-actions {
       display: grid;
       grid-template-columns: repeat(2, minmax(68px, 1fr));
@@ -464,10 +464,13 @@
 
     function renderTasks() {
       $("taskRows").innerHTML = sortedTasks().map((task) => {
-        const statusClass = task.status === "running" ? "status-running" : task.status === "failed_to_start" ? "status-failed" : "status-stopped";
-        const statusText = task.status === "finished" && task.exit_code !== undefined && task.exit_code !== ""
-          ? `finished (${escapeHtml(task.exit_code)})`
-          : escapeHtml(task.status || "");
+        const normalizedStatus = task.status === "running"
+          ? "running"
+          : ["completed", "finished"].includes(task.status)
+            ? "completed"
+            : "interrupted";
+        const statusClass = `status-${normalizedStatus}`;
+        const statusText = normalizedStatus === "running" ? "Running" : normalizedStatus === "completed" ? "Completed" : "Interrupted";
         return `
           <tr>
             <td>${escapeHtml(task.name || "")}</td>

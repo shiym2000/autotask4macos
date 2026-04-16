@@ -420,7 +420,7 @@ async def fetch_process_users(host: HostConfig, pids: list[str]) -> dict[str, st
 
 
 async def refresh_task_status(task: dict[str, Any]) -> None:
-    if task.get("status") not in {"running", "stopped"}:
+    if task.get("status") not in {"running", "stopped", "interrupted"}:
         return
     host = str(task.get("host", ""))
     session = str(task.get("session", ""))
@@ -428,7 +428,7 @@ async def refresh_task_status(task: dict[str, Any]) -> None:
     if done_file:
         done_code, stdout, _ = await run_ssh(host, f"cat {shlex.quote(done_file)} 2>/dev/null", timeout=CONNECT_TIMEOUT)
         if done_code == 0:
-            task["status"] = "finished"
+            task["status"] = "completed"
             task["exit_code"] = stdout.strip().splitlines()[-1] if stdout.strip() else "0"
             task["updated_at"] = time.time()
             return
@@ -436,14 +436,14 @@ async def refresh_task_status(task: dict[str, Any]) -> None:
     if code != 0:
         message = f"{stdout}\n{stderr}".lower()
         if "can't find session" in message or "no server running" in message:
-            task["status"] = "stopped"
+            task["status"] = "interrupted"
             task["updated_at"] = time.time()
         else:
             task["last_error"] = (stderr.strip() or stdout.strip() or "任务状态刷新失败")
         return
     else:
         capture_code, stdout, _ = await run_ssh(host, f"tmux capture-pane -pt {shlex.quote(session)} -S -80", timeout=CONNECT_TIMEOUT)
-        task["status"] = "finished" if capture_code == 0 and "[autotask] 程序已结束" in stdout else "running"
+        task["status"] = "completed" if capture_code == 0 and "[autotask] 程序已结束" in stdout else "running"
     task["updated_at"] = time.time()
 
 
@@ -503,7 +503,7 @@ async def start_remote_task(payload: dict[str, Any]) -> dict[str, Any]:
         "gpus": gpus,
         "conda_env": conda_env,
         "script_path": script_path,
-        "status": "running" if code == 0 else "failed_to_start",
+        "status": "running" if code == 0 else "interrupted",
         "started_at": now,
         "updated_at": now,
         "done_file": done_file,
@@ -550,7 +550,7 @@ async def delete_remote_task(task_id: str) -> dict[str, Any]:
     code, stdout, stderr = await run_ssh(str(task.get("host", "")), f"tmux kill-session -t {shlex.quote(session)}", timeout=SSH_TIMEOUT)
     if code != 0 and "can't find session" not in stderr.lower():
         raise RuntimeError(stderr.strip() or stdout.strip() or "删除 tmux session 失败")
-    task["status"] = "deleted"
+    task["status"] = "interrupted"
     task["updated_at"] = time.time()
     save_tasks()
     return task
