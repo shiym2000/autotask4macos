@@ -239,6 +239,11 @@ def is_completed_task(task: dict[str, Any]) -> bool:
     return task.get("status") in {"completed", "finished"} or str(task.get("exit_code", "")) == "0"
 
 
+def mark_task_ended(task: dict[str, Any]) -> None:
+    if not task.get("ended_at"):
+        task["ended_at"] = time.time()
+
+
 async def run_ssh_command(command: list[str], timeout: int = SSH_TIMEOUT) -> tuple[int, str, str]:
     async def execute() -> tuple[int, str, str]:
         proc = await asyncio.create_subprocess_exec(
@@ -434,6 +439,7 @@ async def refresh_task_status(task: dict[str, Any]) -> None:
         if done_code == 0:
             task["status"] = "completed"
             task["exit_code"] = stdout.strip().splitlines()[-1] if stdout.strip() else "0"
+            mark_task_ended(task)
             task["updated_at"] = time.time()
             return
     code, stdout, stderr = await run_ssh(host, f"tmux has-session -t {shlex.quote(session)}", timeout=CONNECT_TIMEOUT)
@@ -441,6 +447,7 @@ async def refresh_task_status(task: dict[str, Any]) -> None:
         message = f"{stdout}\n{stderr}".lower()
         if "can't find session" in message or "no server running" in message:
             task["status"] = "interrupted"
+            mark_task_ended(task)
             task["updated_at"] = time.time()
         else:
             task["last_error"] = (stderr.strip() or stdout.strip() or "任务状态刷新失败")
@@ -509,6 +516,7 @@ async def start_remote_task(payload: dict[str, Any]) -> dict[str, Any]:
         "script_path": script_path,
         "status": "running" if code == 0 else "interrupted",
         "started_at": now,
+        "ended_at": None if code == 0 else now,
         "updated_at": now,
         "done_file": done_file,
         "exit_code": "",
@@ -557,6 +565,7 @@ async def delete_remote_task(task_id: str) -> dict[str, Any]:
         raise RuntimeError(stderr.strip() or stdout.strip() or "删除 tmux session 失败")
     if not was_completed:
         task["status"] = "interrupted"
+        mark_task_ended(task)
     task["updated_at"] = time.time()
     save_tasks()
     return task
@@ -586,6 +595,7 @@ async def stop_remote_task(task_id: str) -> dict[str, Any]:
     if code != 0:
         raise RuntimeError(stderr.strip() or stdout.strip() or "终止任务程序失败")
     task["status"] = "interrupted"
+    mark_task_ended(task)
     task["updated_at"] = time.time()
     save_tasks()
     return task

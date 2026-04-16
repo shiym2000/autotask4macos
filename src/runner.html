@@ -375,7 +375,7 @@
 
     function fmtDuration(task) {
       if (!task.started_at) return "未知";
-      const end = task.status === "running" ? Date.now() / 1000 : (task.updated_at || Date.now() / 1000);
+      const end = task.status === "running" ? Date.now() / 1000 : (task.ended_at || task.updated_at || Date.now() / 1000);
       const seconds = Math.max(0, Math.floor(end - task.started_at));
       const hours = seconds / 3600;
       const m = Math.floor((seconds % 3600) / 60);
