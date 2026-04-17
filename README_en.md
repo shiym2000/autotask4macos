@@ -56,3 +56,7 @@ After launch, AutoTask4macOS creates a detached `tmux` session on the remote ser
 - If GPU data is missing, check that `nvidia-smi` works on the remote server.
 - If a task cannot start, check that `tmux` is installed and the script path exists.
 - Logs are stored at `data/monitor.log` and `data/runner.log`. Monitor and Runner clear their own logs when they close.
+
+## License
+
+Apache License 2.0

@@ -169,3 +169,8 @@
 - 新任务完成标记写入退出码和远端结束时间戳。
 - Completed 任务运行时间基于完成标记中的结束时间戳计算。
 - 移除旧任务 tmux pane 文本完成检测兼容逻辑。
+
+## 2026-04-17 00:30 - Apache License
+
+- 新增 Apache License 2.0 `LICENSE` 文件。
+- README 和英文 README 补充 License 小节。
