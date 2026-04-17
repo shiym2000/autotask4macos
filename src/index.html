@@ -53,6 +53,7 @@
       min-height: 42px;
     }
     .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .btn.small { min-height: 32px; padding: 5px 8px; font-size: 13px; }
     .btn:hover { filter: brightness(0.98); }
     .btn.loading { opacity: .78; pointer-events: none; }
     .btn.loading::before {
@@ -186,6 +187,13 @@
     }
     .server-title { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; min-width: 0; }
     .server-title h2 { margin: 0; font-size: 22px; overflow-wrap: anywhere; }
+    .server-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
     .server.busy,
     .gpu.busy {
       border-color: rgba(177, 91, 0, .45);
@@ -209,6 +217,7 @@
     .chip.good { color: var(--good); border-color: rgba(12, 122, 67, .25); }
     .chip.bad { color: var(--bad); border-color: rgba(180, 35, 24, .25); }
     .chip.warn { color: var(--warn); border-color: rgba(177, 91, 0, .25); }
+    .chip.idle { color: var(--accent); border-color: rgba(20, 125, 138, .25); }
     .server-meta { color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
     .gpu-list {
       display: grid;
@@ -553,6 +562,14 @@
       `;
     }
 
+    function idleGpuText(server) {
+      if (!server.ok) return "空闲卡：未知";
+      const idle = (server.gpus || [])
+        .filter((gpu) => (gpu.memory?.used_mib ?? Number.POSITIVE_INFINITY) < 1024)
+        .map((gpu) => `#${gpu.index}`);
+      return idle.length ? `空闲卡：${idle.join(", ")}` : "空闲卡：无";
+    }
+
     function renderServers(results) {
       if (!state.config?.configured && !results.length) {
         $("servers").innerHTML = "";
@@ -585,7 +602,11 @@
                 <div class="server-title"><h2>${escapeHtml(server.alias)}</h2>${status}</div>
                 <div class="server-meta">${escapeHtml(meta || server.hostname || "")}</div>
               </div>
-              <span class="chip warn">${server.latency_ms === null ? "等待" : `${server.latency_ms} ms`}</span>
+              <div class="server-actions">
+                <span class="chip idle">${escapeHtml(idleGpuText(server))}</span>
+                <span class="chip warn">${server.latency_ms === null ? "等待" : `${server.latency_ms} ms`}</span>
+                <button class="btn small" data-server-refresh="${escapeHtml(server.alias)}" type="button">刷新</button>
+              </div>
             </summary>
             ${body}
           </details>
@@ -659,6 +680,16 @@
       }
     }
 
+    async function refreshServer(alias) {
+      try {
+        const status = await api(`/api/status?refresh=1&host=${encodeURIComponent(alias)}`);
+        renderSummary(status.results || [], status.updated_at);
+        renderServers(status.results || []);
+      } catch (err) {
+        $("servers").innerHTML = `<section class="server"><div class="error-box">后台服务没有响应：${escapeHtml(err.message)}</div></section>`;
+      }
+    }
+
     async function withButtonLoading(button, action) {
       button.classList.add("loading");
       button.disabled = true;
@@ -702,6 +733,13 @@
       if (serverDetails) toggleServerGpus(serverDetails);
     });
     $("servers").addEventListener("click", (event) => {
+      const serverRefresh = event.target.closest("[data-server-refresh]");
+      if (serverRefresh) {
+        event.preventDefault();
+        event.stopPropagation();
+        withButtonLoading(serverRefresh, () => refreshServer(serverRefresh.dataset.serverRefresh));
+        return;
+      }
       const th = event.target.closest("[data-process-sort]");
       if (!th) return;
       const table = th.closest("table[data-table-key]");

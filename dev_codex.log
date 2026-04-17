@@ -174,3 +174,8 @@
 
 - 新增 Apache License 2.0 `LICENSE` 文件。
 - README 和英文 README 补充 License 小节。
+
+## 2026-04-17 00:45 - Monitor 单服务器刷新与空闲卡
+
+- 每个服务器头部新增单独刷新按钮，只刷新对应服务器。
+- 服务器头部显示显存占用低于 1GB 的空闲 GPU 卡号。
