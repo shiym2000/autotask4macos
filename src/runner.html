@@ -182,13 +182,18 @@
     .status-running { color: var(--good); font-weight: 700; }
     .status-completed { color: var(--muted); font-weight: 700; }
     .status-interrupted { color: var(--bad); font-weight: 700; }
+    .task-status {
+      cursor: pointer;
+      user-select: none;
+    }
     .task-name {
       display: inline;
       color: var(--ink);
       cursor: text;
       user-select: text;
     }
-    .script-path-tip {
+    .script-path-tip,
+    .status-note-tip {
       position: fixed;
       z-index: 120;
       display: none;
@@ -207,13 +212,17 @@
       overflow-wrap: anywhere;
       user-select: text;
     }
-    .script-path-tip.visible { display: block; }
-    .script-path-tip-label {
+    .script-path-tip.visible,
+    .status-note-tip.visible { display: block; }
+    .script-path-tip-label,
+    .status-note-tip-label {
       margin-bottom: 4px;
       color: var(--muted);
       font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       font-size: 12px;
     }
+    .status-note-tip-content { white-space: pre-wrap; }
+    .status-note-tip-empty { color: var(--muted); }
     .task-actions {
       display: grid;
       grid-template-columns: repeat(2, minmax(68px, 1fr));
@@ -344,6 +353,7 @@
       </section>
     </div>
     <div class="script-path-tip" id="scriptPathTip" role="tooltip"></div>
+    <div class="status-note-tip" id="statusNoteTip" role="tooltip"></div>
   </main>
 
   <script>
@@ -502,6 +512,7 @@
 
     function renderTasks() {
       hideScriptPathTip();
+      hideStatusNoteTip();
       $("taskRows").innerHTML = sortedTasks().map((task) => {
         const normalizedStatus = task.status === "running"
           ? "running"
@@ -520,7 +531,9 @@
             <td>${escapeHtml(task.host || "")}</td>
             <td>${escapeHtml((task.gpus || []).join(","))}</td>
             <td>${escapeHtml(task.conda_env || "不使用")}</td>
-            <td class="${statusClass}" title="${escapeHtml(task.last_error || "")}">${escapeHtml(statusText)}</td>
+            <td class="${statusClass}">
+              <span class="task-status" tabindex="0" data-note-task="${escapeHtml(task.id)}">${escapeHtml(statusText)}</span>
+            </td>
             <td>${fmtTime(task.started_at)}</td>
             <td>${fmtDuration(task)}</td>
             <td>
@@ -781,6 +794,7 @@
     }
 
     let scriptTipTimer = null;
+    let statusNoteTimer = null;
 
     function hideScriptPathTip() {
       if (scriptTipTimer) clearTimeout(scriptTipTimer);
@@ -808,6 +822,61 @@
       const left = Math.min(window.innerWidth - tip.offsetWidth - margin, rect.left);
       tip.style.top = `${Math.max(margin, top)}px`;
       tip.style.left = `${Math.max(margin, left)}px`;
+    }
+
+    function hideStatusNoteTip() {
+      if (statusNoteTimer) clearTimeout(statusNoteTimer);
+      $("statusNoteTip").classList.remove("visible");
+    }
+
+    function scheduleHideStatusNoteTip() {
+      if (statusNoteTimer) clearTimeout(statusNoteTimer);
+      statusNoteTimer = setTimeout(hideStatusNoteTip, 180);
+    }
+
+    function taskById(id) {
+      return state.tasks.find((task) => String(task.id) === String(id));
+    }
+
+    function showStatusNoteTip(target) {
+      const task = taskById(target.dataset.noteTask);
+      const note = String(task?.note || "");
+      const tip = $("statusNoteTip");
+      if (statusNoteTimer) clearTimeout(statusNoteTimer);
+      tip.innerHTML = note
+        ? `
+          <div class="status-note-tip-label">备注</div>
+          <div class="status-note-tip-content">${escapeHtml(note)}</div>
+        `
+        : `
+          <div class="status-note-tip-label">备注</div>
+          <div class="status-note-tip-content status-note-tip-empty">暂无备注，点击任务状态添加。</div>
+        `;
+      tip.classList.add("visible");
+
+      const rect = target.getBoundingClientRect();
+      const margin = 8;
+      const top = Math.min(window.innerHeight - tip.offsetHeight - margin, rect.bottom + margin);
+      const left = Math.min(window.innerWidth - tip.offsetWidth - margin, rect.left);
+      tip.style.top = `${Math.max(margin, top)}px`;
+      tip.style.left = `${Math.max(margin, left)}px`;
+    }
+
+    async function editTaskNote(id) {
+      const task = taskById(id);
+      if (!task) return;
+      const nextNote = window.prompt(`编辑“${task.name || "任务"}”的备注`, task.note || "");
+      if (nextNote === null) return;
+      try {
+        const data = await api("/api/tasks/note", {
+          method: "POST",
+          body: JSON.stringify({ id, note: nextNote }),
+        });
+        state.tasks = state.tasks.map((item) => item.id === id ? data.task : item);
+        renderTasks();
+      } catch (err) {
+        alert(err.message);
+      }
     }
 
     $("serverSelect").addEventListener("change", async (event) => {
@@ -857,10 +926,12 @@
       renderTasks();
     });
     $("taskRows").addEventListener("click", (event) => {
+      const noteStatus = event.target.closest("[data-note-task]");
       const attach = event.target.closest("[data-attach]");
       const stop = event.target.closest("[data-stop]");
       const del = event.target.closest("[data-delete]");
       const remove = event.target.closest("[data-remove]");
+      if (noteStatus) editTaskNote(noteStatus.dataset.noteTask);
       if (attach) showAttach(attach.dataset.attach);
       if (stop) stopTask(stop.dataset.stop);
       if (del) deleteTask(del.dataset.delete);
@@ -886,13 +957,40 @@
       if (scriptTipTimer) clearTimeout(scriptTipTimer);
     });
     $("scriptPathTip").addEventListener("pointerout", scheduleHideScriptPathTip);
-    window.addEventListener("scroll", hideScriptPathTip);
-    window.addEventListener("resize", hideScriptPathTip);
+    $("taskRows").addEventListener("pointerover", (event) => {
+      const status = event.target.closest("[data-note-task]");
+      if (status) showStatusNoteTip(status);
+    });
+    $("taskRows").addEventListener("pointerout", (event) => {
+      const status = event.target.closest("[data-note-task]");
+      if (status) scheduleHideStatusNoteTip();
+    });
+    $("taskRows").addEventListener("focusin", (event) => {
+      const status = event.target.closest("[data-note-task]");
+      if (status) showStatusNoteTip(status);
+    });
+    $("taskRows").addEventListener("focusout", (event) => {
+      const status = event.target.closest("[data-note-task]");
+      if (status) scheduleHideStatusNoteTip();
+    });
+    $("statusNoteTip").addEventListener("pointerover", () => {
+      if (statusNoteTimer) clearTimeout(statusNoteTimer);
+    });
+    $("statusNoteTip").addEventListener("pointerout", scheduleHideStatusNoteTip);
+    window.addEventListener("scroll", () => {
+      hideScriptPathTip();
+      hideStatusNoteTip();
+    });
+    window.addEventListener("resize", () => {
+      hideScriptPathTip();
+      hideStatusNoteTip();
+    });
     window.addEventListener("pagehide", shutdownServer);
     window.addEventListener("beforeunload", shutdownServer);
     window.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;
       hideScriptPathTip();
+      hideStatusNoteTip();
       $("taskModal").classList.add("hidden");
       if (state.config?.configured) $("configModal").classList.add("hidden");
     });

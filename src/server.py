@@ -699,6 +699,15 @@ async def stop_remote_task(task_id: str) -> dict[str, Any]:
     return task
 
 
+async def update_task_note(task_id: str, note: str) -> dict[str, Any]:
+    task = next((item for item in TASKS if str(item.get("id")) == task_id), None)
+    if not task:
+        raise ValueError("任务不存在")
+    task["note"] = note[:1000]
+    save_tasks()
+    return task
+
+
 async def capture_task_output(task_id: str) -> dict[str, str]:
     task = next((item for item in TASKS if str(item.get("id")) == task_id), None)
     if not task:
@@ -1007,6 +1016,21 @@ class GpuMonitorHandler(BaseHTTPRequestHandler):
             try:
                 payload = json.loads(raw)
                 task = asyncio.run(remove_task_record(str(payload.get("id", ""))))
+            except json.JSONDecodeError:
+                self.send_json({"ok": False, "error": "请求不是合法 JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            except (ValueError, RuntimeError) as exc:
+                self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            self.send_json({"ok": True, "task": public_task(task)})
+            return
+
+        if path == "/api/tasks/note":
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length).decode("utf-8", errors="replace")
+            try:
+                payload = json.loads(raw)
+                task = asyncio.run(update_task_note(str(payload.get("id", "")), str(payload.get("note", ""))))
             except json.JSONDecodeError:
                 self.send_json({"ok": False, "error": "请求不是合法 JSON"}, HTTPStatus.BAD_REQUEST)
                 return
