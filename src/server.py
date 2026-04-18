@@ -589,6 +589,28 @@ async def refresh_all_tasks() -> None:
     save_tasks()
 
 
+async def clear_stale_task_name(name: str) -> None:
+    global TASKS
+    matches = [task for task in TASKS if str(task.get("name", "")).strip() == name]
+    if not matches:
+        return
+
+    stale_ids: set[str] = set()
+    for task in matches:
+        try:
+            exists = await remote_tmux_session_exists(task)
+        except RuntimeError:
+            exists = True
+        if not exists:
+            stale_ids.add(str(task.get("id")))
+
+    if not stale_ids:
+        raise ValueError("任务名已存在，请换一个任务名")
+
+    TASKS = [task for task in TASKS if str(task.get("id")) not in stale_ids]
+    save_tasks()
+
+
 async def start_remote_task(payload: dict[str, Any]) -> dict[str, Any]:
     hosts, _ = load_hosts()
     aliases = {host.alias for host in hosts}
@@ -599,8 +621,7 @@ async def start_remote_task(payload: dict[str, Any]) -> dict[str, Any]:
     name = str(payload.get("name", "")).strip()
     if not name:
         raise ValueError("请输入任务名")
-    if any(str(task.get("name", "")).strip() == name for task in TASKS):
-        raise ValueError("任务名已存在，请换一个任务名")
+    await clear_stale_task_name(name)
 
     gpus = [str(item).strip() for item in payload.get("gpus", []) if str(item).strip() != ""]
     if not all(gpu.isdigit() for gpu in gpus):
@@ -1306,6 +1327,8 @@ def self_test() -> int:
     task = {"status": "completed", "exit_code": "0", "last_error": ""}
     assert not normalize_task_exit_status(task)
     assert task["status"] == "completed"
+    stale_task_names = [{"id": "1", "name": "stale"}, {"id": "2", "name": "other"}]
+    assert [task["id"] for task in stale_task_names if str(task.get("name", "")).strip() == "stale"] == ["1"]
     print("self-test passed")
     return 0
 
