@@ -135,6 +135,14 @@
       padding: 7px 10px;
       color: var(--muted);
       font-weight: 700;
+      min-height: 36px;
+      cursor: pointer;
+    }
+    button.summary-chip { font: inherit; }
+    .summary-chip.active {
+      border-color: var(--accent);
+      box-shadow: inset 0 0 0 1px var(--accent);
+      color: var(--ink);
     }
     .summary-chip strong { color: var(--ink); }
     .summary-chip.running strong { color: var(--good); }
@@ -319,10 +327,10 @@
     </header>
 
     <div class="task-status-summary" aria-label="任务状态统计">
-      <span class="summary-chip">全部 <strong id="countAll">0</strong></span>
-      <span class="summary-chip running">Running <strong id="countRunning">0</strong></span>
-      <span class="summary-chip completed">Completed <strong id="countCompleted">0</strong></span>
-      <span class="summary-chip interrupted">Interrupted <strong id="countInterrupted">0</strong></span>
+      <button class="summary-chip active" data-status-filter="all" type="button">全部 <strong id="countAll">0</strong></button>
+      <button class="summary-chip running" data-status-filter="running" type="button">Running <strong id="countRunning">0</strong></button>
+      <button class="summary-chip completed" data-status-filter="completed" type="button">Completed <strong id="countCompleted">0</strong></button>
+      <button class="summary-chip interrupted" data-status-filter="interrupted" type="button">Interrupted <strong id="countInterrupted">0</strong></button>
     </div>
 
     <section class="grid">
@@ -412,6 +420,7 @@
       selectedHost: "",
       selectedGpus: new Set(),
       tasks: [],
+      statusFilters: new Set(),
       sortKey: "started_at",
       sortDirection: "desc",
       timer: null,
@@ -506,10 +515,21 @@
       $("countRunning").textContent = String(counts.running);
       $("countCompleted").textContent = String(counts.completed);
       $("countInterrupted").textContent = String(counts.interrupted);
+      document.querySelectorAll("[data-status-filter]").forEach((button) => {
+        const filter = button.dataset.statusFilter;
+        const active = filter === "all" ? state.statusFilters.size === 0 : state.statusFilters.has(filter);
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+    }
+
+    function visibleTasks() {
+      if (!state.statusFilters.size) return [...state.tasks];
+      return state.tasks.filter((task) => state.statusFilters.has(normalizedTaskStatus(task)));
     }
 
     function sortedTasks() {
-      const tasks = [...state.tasks];
+      const tasks = visibleTasks();
       const key = state.sortKey;
       const direction = state.sortDirection === "asc" ? 1 : -1;
       return tasks.sort((a, b) => {
@@ -610,7 +630,7 @@
             </td>
           </tr>
         `;
-      }).join("") || `<tr><td colspan="8">还没有任务。</td></tr>`;
+      }).join("") || `<tr><td colspan="8">${state.tasks.length ? "没有符合筛选条件的任务。" : "还没有任务。"}</td></tr>`;
       renderSortHeaders();
     }
 
@@ -1005,6 +1025,19 @@
         await loadStatus(true);
         await loadTasks(true);
       });
+    });
+    document.querySelector(".task-status-summary").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-status-filter]");
+      if (!button) return;
+      const filter = button.dataset.statusFilter;
+      if (filter === "all") {
+        state.statusFilters.clear();
+      } else if (state.statusFilters.has(filter)) {
+        state.statusFilters.delete(filter);
+      } else {
+        state.statusFilters.add(filter);
+      }
+      renderTasks();
     });
     $("editConfigBtn").addEventListener("click", openConfigModal);
     $("cancelConfigBtn").addEventListener("click", () => $("configModal").classList.add("hidden"));
