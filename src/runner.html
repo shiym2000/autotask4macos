@@ -835,7 +835,7 @@
     async function removeTask(id) {
       const task = state.tasks.find((item) => item.id === id);
       if (!task) return;
-      const ok = window.confirm(`确定要删除任务“${task.name}”的本地记录吗？\n如果 tmux 不存在会直接删除；如果 tmux 存在且程序已结束，会先删除 tmux；如果程序仍在运行，会拒绝删除。`);
+      const ok = window.confirm(`确定要删除任务“${task.name}”的本地记录吗？\n如果 tmux 不存在或服务器连不上，会直接删除本地记录；如果 tmux 存在且程序已结束，会先删除 tmux；如果程序仍在运行，会拒绝删除。`);
       if (!ok) return;
       try {
         await api("/api/tasks/remove", {

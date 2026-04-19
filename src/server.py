@@ -773,7 +773,12 @@ async def remove_task_record(task_id: str) -> dict[str, Any]:
     task = next((item for item in TASKS if str(item.get("id")) == task_id), None)
     if not task:
         raise ValueError("任务不存在")
-    if await remote_tmux_session_exists(task):
+    try:
+        tmux_exists = await remote_tmux_session_exists(task)
+    except RuntimeError as exc:
+        task["last_error"] = str(exc)
+        tmux_exists = False
+    if tmux_exists:
         if not await remote_task_finished(task):
             raise RuntimeError("tmux session 仍存在，且没有检测到程序结束标记；请先终止程序或等待任务结束。")
         session = str(task.get("session", ""))
