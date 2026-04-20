@@ -229,7 +229,8 @@
       user-select: text;
     }
     .script-path-tip,
-    .status-note-tip {
+    .status-note-tip,
+    .end-time-tip {
       position: fixed;
       z-index: 120;
       display: none;
@@ -249,9 +250,11 @@
       user-select: text;
     }
     .script-path-tip.visible,
-    .status-note-tip.visible { display: block; }
+    .status-note-tip.visible,
+    .end-time-tip.visible { display: block; }
     .script-path-tip-label,
-    .status-note-tip-label {
+    .status-note-tip-label,
+    .end-time-tip-label {
       margin-bottom: 4px;
       color: var(--muted);
       font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -410,6 +413,7 @@
     </div>
     <div class="script-path-tip" id="scriptPathTip" role="tooltip"></div>
     <div class="status-note-tip" id="statusNoteTip" role="tooltip"></div>
+    <div class="end-time-tip" id="endTimeTip" role="tooltip"></div>
     <div class="status-action-menu" id="statusActionMenu" role="menu"></div>
   </main>
 
@@ -534,6 +538,12 @@
       return task.started_at || 0;
     }
 
+    function taskEndTimeLabel(task) {
+      if (normalizedTaskStatus(task) === "running") return "";
+      const ended = taskEndTime(task);
+      return ended ? fmtTime(ended) : "";
+    }
+
     function sortedTasks() {
       const tasks = visibleTasks();
       const key = state.sortKey;
@@ -608,6 +618,7 @@
 
     function renderTasks() {
       hideScriptPathTip();
+      hideEndTimeTip();
       hideStatusNoteTip();
       hideStatusActionMenu();
       renderStatusSummary();
@@ -619,6 +630,7 @@
           : normalizedStatus === "completed"
             ? "Completed"
             : "Interrupted";
+        const endTime = taskEndTimeLabel(task);
         return `
           <tr>
             <td><span class="task-name" tabindex="0" data-script-path="${escapeHtml(task.script_path || "")}">${escapeHtml(task.name || "")}</span></td>
@@ -629,7 +641,7 @@
               <span class="task-status" tabindex="0" data-note-task="${escapeHtml(task.id)}">${escapeHtml(statusText)}</span>
             </td>
             <td>${fmtTime(task.started_at)}</td>
-            <td>${fmtDuration(task)}</td>
+            <td><span class="task-duration" data-end-time="${escapeHtml(endTime)}">${fmtDuration(task)}</span></td>
             <td>
               <div class="task-actions">
                 <button class="btn small" data-attach="${escapeHtml(task.id)}">打开tmux</button>
@@ -889,6 +901,7 @@
 
     let scriptTipTimer = null;
     let statusNoteTimer = null;
+    let endTimeTimer = null;
 
     function hideScriptPathTip() {
       if (scriptTipTimer) clearTimeout(scriptTipTimer);
@@ -907,6 +920,35 @@
       tip.innerHTML = `
         <div class="script-path-tip-label">脚本路径</div>
         <div>${escapeHtml(path)}</div>
+      `;
+      tip.classList.add("visible");
+
+      const rect = target.getBoundingClientRect();
+      const margin = 8;
+      const top = Math.min(window.innerHeight - tip.offsetHeight - margin, rect.bottom + margin);
+      const left = Math.min(window.innerWidth - tip.offsetWidth - margin, rect.left);
+      tip.style.top = `${Math.max(margin, top)}px`;
+      tip.style.left = `${Math.max(margin, left)}px`;
+    }
+
+    function hideEndTimeTip() {
+      if (endTimeTimer) clearTimeout(endTimeTimer);
+      $("endTimeTip").classList.remove("visible");
+    }
+
+    function scheduleHideEndTimeTip() {
+      if (endTimeTimer) clearTimeout(endTimeTimer);
+      endTimeTimer = setTimeout(hideEndTimeTip, 180);
+    }
+
+    function showEndTimeTip(target) {
+      const endTime = target.dataset.endTime || "";
+      if (!endTime) return;
+      const tip = $("endTimeTip");
+      if (endTimeTimer) clearTimeout(endTimeTimer);
+      tip.innerHTML = `
+        <div class="end-time-tip-label">结束时间</div>
+        <div>${escapeHtml(endTime)}</div>
       `;
       tip.classList.add("visible");
 
@@ -1117,6 +1159,18 @@
     });
     $("scriptPathTip").addEventListener("pointerout", scheduleHideScriptPathTip);
     $("taskRows").addEventListener("pointerover", (event) => {
+      const duration = event.target.closest(".task-duration");
+      if (duration) showEndTimeTip(duration);
+    });
+    $("taskRows").addEventListener("pointerout", (event) => {
+      const duration = event.target.closest(".task-duration");
+      if (duration) scheduleHideEndTimeTip();
+    });
+    $("endTimeTip").addEventListener("pointerover", () => {
+      if (endTimeTimer) clearTimeout(endTimeTimer);
+    });
+    $("endTimeTip").addEventListener("pointerout", scheduleHideEndTimeTip);
+    $("taskRows").addEventListener("pointerover", (event) => {
       const status = event.target.closest("[data-note-task]");
       if (status) showStatusNoteTip(status);
     });
@@ -1155,11 +1209,13 @@
     });
     window.addEventListener("scroll", () => {
       hideScriptPathTip();
+      hideEndTimeTip();
       hideStatusNoteTip();
       hideStatusActionMenu();
     });
     window.addEventListener("resize", () => {
       hideScriptPathTip();
+      hideEndTimeTip();
       hideStatusNoteTip();
       hideStatusActionMenu();
     });
@@ -1168,6 +1224,7 @@
     window.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;
       hideScriptPathTip();
+      hideEndTimeTip();
       hideStatusNoteTip();
       hideStatusActionMenu();
       $("taskModal").classList.add("hidden");
