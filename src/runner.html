@@ -528,6 +528,12 @@
       return state.tasks.filter((task) => state.statusFilters.has(normalizedTaskStatus(task)));
     }
 
+    function taskEndTime(task) {
+      if (task.ended_at) return task.ended_at;
+      if (task.status !== "running" && task.updated_at) return task.updated_at;
+      return task.started_at || 0;
+    }
+
     function sortedTasks() {
       const tasks = visibleTasks();
       const key = state.sortKey;
@@ -535,6 +541,10 @@
       return tasks.sort((a, b) => {
         let av = key === "duration" ? (Date.now() / 1000 - (a.started_at || 0)) : a[key];
         let bv = key === "duration" ? (Date.now() / 1000 - (b.started_at || 0)) : b[key];
+        if (key === "ended_at") {
+          av = taskEndTime(a);
+          bv = taskEndTime(b);
+        }
         if (key === "actions") return 0;
         if (Array.isArray(av)) av = av.join(",");
         if (Array.isArray(bv)) bv = bv.join(",");
@@ -1032,10 +1042,20 @@
       const filter = button.dataset.statusFilter;
       if (filter === "all") {
         state.statusFilters.clear();
+        state.sortKey = "started_at";
+        state.sortDirection = "desc";
       } else if (state.statusFilters.has(filter)) {
         state.statusFilters.delete(filter);
       } else {
         state.statusFilters.add(filter);
+        if (["completed", "interrupted"].includes(filter)) {
+          state.sortKey = "ended_at";
+          state.sortDirection = "desc";
+        }
+      }
+      if (!state.statusFilters.size) {
+        state.sortKey = "started_at";
+        state.sortDirection = "desc";
       }
       renderTasks();
     });
