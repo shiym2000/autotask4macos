@@ -309,6 +309,21 @@ def mark_task_ended(task: dict[str, Any]) -> None:
         task["ended_at"] = time.time()
 
 
+def task_record_finish_time(task: dict[str, Any] | None) -> float | None:
+    if not task:
+        return None
+    if task.get("status") not in {"completed", "finished", "interrupted"}:
+        return None
+    for key in ("ended_at", "updated_at"):
+        value = task.get(key)
+        if value:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
 def exit_code_is_success(exit_code: Any) -> bool:
     return str(exit_code).strip() in {"", "0"}
 
@@ -577,14 +592,6 @@ async def refresh_task_status(task: dict[str, Any]) -> None:
         return
     host = str(task.get("host", ""))
     session = str(task.get("session", ""))
-    done_file = str(task.get("done_file", ""))
-    if done_file:
-        done_code, stdout, _ = await run_ssh(host, f"cat {shlex.quote(done_file)} 2>/dev/null", timeout=CONNECT_TIMEOUT)
-        if done_code == 0:
-            exit_code, ended_at = read_done_file(stdout)
-            if exit_code is not None:
-                apply_task_exit_code(task, exit_code, ended_at)
-                return
     if is_queued_task(task):
         queue_after_id = str(task.get("queue_after_id", ""))
         queue_after = next((item for item in TASKS if str(item.get("id")) == queue_after_id), None) if queue_after_id else None
@@ -600,27 +607,37 @@ async def refresh_task_status(task: dict[str, Any]) -> None:
             mark_task_ended(task)
             task["updated_at"] = time.time()
             return
-        code, stdout, stderr = await run_ssh(host, f"tmux has-session -t {shlex.quote(session)}", timeout=CONNECT_TIMEOUT)
-        if code != 0:
-            if tmux_session_missing(stdout, stderr):
-                task["status"] = "interrupted"
-                mark_task_ended(task)
-                task["updated_at"] = time.time()
-            else:
-                task["last_error"] = (stderr.strip() or stdout.strip() or "任务状态刷新失败")
-            return
         start_file = str(task.get("start_file", ""))
         if start_file:
             start_code, stdout, _ = await run_ssh(host, f"cat {shlex.quote(start_file)} 2>/dev/null", timeout=CONNECT_TIMEOUT)
             if start_code == 0:
                 try:
-                    task["started_at"] = float(stdout.strip().splitlines()[0])
+                    started_at = float(stdout.strip().splitlines()[0])
                 except (IndexError, ValueError):
-                    task["started_at"] = time.time()
+                    started_at = time.time()
+                task["started_at"] = task_record_finish_time(queue_after) or started_at
                 task["status"] = "running"
                 task["updated_at"] = time.time()
+            else:
+                code, stdout, stderr = await run_ssh(host, f"tmux has-session -t {shlex.quote(session)}", timeout=CONNECT_TIMEOUT)
+                if code != 0:
+                    if tmux_session_missing(stdout, stderr):
+                        task["status"] = "interrupted"
+                        mark_task_ended(task)
+                        task["updated_at"] = time.time()
+                    else:
+                        task["last_error"] = (stderr.strip() or stdout.strip() or "任务状态刷新失败")
+                return
+        else:
             return
-        return
+    done_file = str(task.get("done_file", ""))
+    if done_file:
+        done_code, stdout, _ = await run_ssh(host, f"cat {shlex.quote(done_file)} 2>/dev/null", timeout=CONNECT_TIMEOUT)
+        if done_code == 0:
+            exit_code, ended_at = read_done_file(stdout)
+            if exit_code is not None:
+                apply_task_exit_code(task, exit_code, ended_at)
+                return
     code, stdout, stderr = await run_ssh(host, f"tmux has-session -t {shlex.quote(session)}", timeout=CONNECT_TIMEOUT)
     if code != 0:
         if tmux_session_missing(stdout, stderr):
@@ -719,16 +736,23 @@ async def start_remote_task(payload: dict[str, Any]) -> dict[str, Any]:
         gpus=gpus,
         conda_env=conda_env,
         script_path=script_path,
-        start_file=start_file,
+        start_file="" if queue_after else start_file,
     )
     if queue_after:
         command_to_send = "bash -lc " + shlex.quote(inner)
         queue_after_done_file = str(queue_after.get("done_file", ""))
+        if not queue_after_done_file:
+            raise ValueError("排队目标任务缺少结束标记文件")
         queue_after_cancel_file = str(queue_after.get("cancel_file", ""))
         predecessor_canceled = (
             f"[ -f {shlex.quote(queue_after_cancel_file)} ] && exit 0; "
             if queue_after_cancel_file
             else ""
+        )
+        write_start_marker = (
+            f"started_at=$(sed -n '2p' {shlex.quote(queue_after_done_file)}); "
+            "if [ -z \"$started_at\" ]; then started_at=$(date +%s); fi; "
+            f"printf '%s\\n' \"$started_at\" > {shlex.quote(start_file)}; "
         )
         waiter = (
             "while :; do "
@@ -739,6 +763,7 @@ async def start_remote_task(payload: dict[str, Any]) -> dict[str, Any]:
             "sleep 5; "
             "done; "
             f"[ -f {shlex.quote(cancel_file)} ] && exit 0; "
+            f"{write_start_marker}"
             f"tmux send-keys -t {shlex.quote(session)} -- {shlex.quote(command_to_send)} C-m"
         )
         remote = f"nohup bash -lc {shlex.quote(waiter)} >/dev/null 2>&1 &"
@@ -756,7 +781,7 @@ async def start_remote_task(payload: dict[str, Any]) -> dict[str, Any]:
         "conda_env": conda_env,
         "script_path": script_path,
         "status": "queued" if queue_after and code == 0 else "running" if code == 0 else "interrupted",
-        "started_at": now,
+        "started_at": None if queue_after and code == 0 else now,
         "ended_at": None if code == 0 else now,
         "updated_at": now,
         "done_file": done_file,
@@ -1433,6 +1458,8 @@ def self_test() -> int:
     assert tmux_session_missing("no server running on /tmp/tmux-501/default", "")
     assert not tmux_session_missing("", "permission denied")
     assert is_queued_task({"status": "queued"})
+    assert task_record_finish_time({"status": "completed", "ended_at": "1776402651"}) == 1776402651.0
+    assert task_record_finish_time({"status": "running", "updated_at": "1776402651"}) is None
     queued_inner = build_task_inner_command(
         done_file="/tmp/task.done",
         gpus=["0", "1"],
