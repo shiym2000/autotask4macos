@@ -50,6 +50,7 @@
     }
     .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
     .btn.small { min-height: 32px; padding: 5px 8px; font-size: 13px; }
+    .btn:disabled { cursor: not-allowed; opacity: .52; }
     .btn.loading { opacity: .78; pointer-events: none; }
     .btn.loading::before {
       content: "";
@@ -667,6 +668,7 @@
             ? "Completed"
             : "Interrupted";
         const endTime = taskEndTimeLabel(task);
+        const queueNoop = normalizedStatus === "queued" ? " disabled title=\"排队任务尚未进入 tmux，不会影响正在运行的任务\"" : "";
         return `
           <tr>
             <td><span class="task-name" tabindex="0" data-script-path="${escapeHtml(task.script_path || "")}">${escapeHtml(task.name || "")}</span></td>
@@ -681,8 +683,8 @@
             <td>
               <div class="task-actions">
                 <button class="btn small" data-attach="${escapeHtml(task.id)}">打开tmux</button>
-                <button class="btn small" data-stop="${escapeHtml(task.id)}">终止程序</button>
-                <button class="btn small" data-delete="${escapeHtml(task.id)}">删除tmux</button>
+                <button class="btn small" data-stop="${escapeHtml(task.id)}"${queueNoop}>终止程序</button>
+                <button class="btn small" data-delete="${escapeHtml(task.id)}"${queueNoop}>删除tmux</button>
                 <button class="btn small" data-remove="${escapeHtml(task.id)}">删除任务</button>
               </div>
             </td>

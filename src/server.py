@@ -345,6 +345,27 @@ def is_queued_task(task: dict[str, Any]) -> bool:
     return task.get("status") == "queued"
 
 
+async def cancel_queued_task_waiter(task: dict[str, Any]) -> None:
+    cancel_file = str(task.get("cancel_file", ""))
+    if cancel_file:
+        await run_ssh(str(task.get("host", "")), f"touch {shlex.quote(cancel_file)}", timeout=CONNECT_TIMEOUT)
+
+
+async def interrupt_dependent_queued_tasks(task_id: str, reason: str) -> None:
+    dependents = [
+        task
+        for task in TASKS
+        if is_queued_task(task) and str(task.get("queue_after_id", "")) == task_id
+    ]
+    for task in dependents:
+        await cancel_queued_task_waiter(task)
+        task["status"] = "interrupted"
+        task["last_error"] = reason
+        mark_task_ended(task)
+        task["updated_at"] = time.time()
+        await interrupt_dependent_queued_tasks(str(task.get("id", "")), reason)
+
+
 def read_done_file(stdout: str) -> tuple[str | None, float | None]:
     lines = [line.strip() for line in stdout.splitlines() if line.strip()]
     exit_code = lines[0] if lines else None
@@ -880,13 +901,6 @@ async def delete_remote_task(task_id: str) -> dict[str, Any]:
     if not task:
         raise ValueError("任务不存在")
     if is_queued_task(task):
-        cancel_file = str(task.get("cancel_file", ""))
-        if cancel_file:
-            await run_ssh(str(task.get("host", "")), f"touch {shlex.quote(cancel_file)}", timeout=CONNECT_TIMEOUT)
-        task["status"] = "interrupted"
-        mark_task_ended(task)
-        task["updated_at"] = time.time()
-        save_tasks()
         return task
     was_completed = is_completed_task(task)
     session = str(task.get("session", ""))
@@ -907,13 +921,9 @@ async def remove_task_record(task_id: str) -> dict[str, Any]:
     if not task:
         raise ValueError("任务不存在")
     if is_queued_task(task):
-        cancel_file = str(task.get("cancel_file", ""))
-        if cancel_file:
-            try:
-                await run_ssh(str(task.get("host", "")), f"touch {shlex.quote(cancel_file)}", timeout=CONNECT_TIMEOUT)
-            except RuntimeError:
-                pass
+        await cancel_queued_task_waiter(task)
         TASKS = [item for item in TASKS if str(item.get("id")) != task_id]
+        await interrupt_dependent_queued_tasks(task_id, "前置排队任务已删除")
         save_tasks()
         return task
     try:
@@ -941,6 +951,8 @@ async def stop_remote_task(task_id: str) -> dict[str, Any]:
     task = next((item for item in TASKS if str(item.get("id")) == task_id), None)
     if not task:
         raise ValueError("任务不存在")
+    if is_queued_task(task):
+        return task
     if is_completed_task(task):
         task["status"] = "completed"
         save_tasks()
