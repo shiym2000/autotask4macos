@@ -438,6 +438,7 @@
       timer: null,
       heartbeatTimer: null,
       gpuCache: {},
+      condaCache: {},
     };
     const $ = (id) => document.getElementById(id);
     const gb = (value) => value === null || value === undefined ? "未知" : `${(value / 1024).toFixed(1)} GB`;
@@ -598,7 +599,10 @@
         $("gpuChoices").innerHTML = `<div class="hint">显卡读取失败：${escapeHtml(result.error || "无法读取这台服务器")}</div>`;
         return;
       }
-      $("gpuChoices").innerHTML = gpus.map((gpu) => {
+      const warning = result?.stale_error
+        ? `<div class="hint">本次显卡读取失败，已使用上一次成功结果：${escapeHtml(result.stale_error)}</div>`
+        : "";
+      $("gpuChoices").innerHTML = warning + (gpus.map((gpu) => {
         const checked = state.selectedGpus.has(String(gpu.index)) ? " checked" : "";
         return `
           <label class="gpu-option">
@@ -606,23 +610,43 @@
             <span>#${gpu.index} ${escapeHtml(gpu.name)}</span>
           </label>
         `;
-      }).join("") || `<div class="hint">${state.selectedHost ? "这台服务器没有读取到显卡。" : "请先选择服务器。"}</div>`;
+      }).join("") || `<div class="hint">${state.selectedHost ? "这台服务器没有读取到显卡。" : "请先选择服务器。"}</div>`);
+    }
+
+    function renderCondaOptions(envs = [], staleError = "") {
+      const select = $("condaSelect");
+      const selected = select.value;
+      select.innerHTML = `<option value="">不使用 Conda 环境</option>`;
+      if (staleError) {
+        select.innerHTML += `<option value="" disabled>连接失败，已使用上次成功缓存</option>`;
+      }
+      select.innerHTML += envs.length
+        ? envs.map((env) => `<option value="${escapeHtml(env)}">${escapeHtml(env)}</option>`).join("")
+        : `<option value="" disabled>没有读取到 Conda 环境</option>`;
+      if (selected && envs.includes(selected)) {
+        select.value = selected;
+      }
+      select.title = staleError || "";
     }
 
     async function loadRemoteCondaEnvs() {
       const select = $("condaSelect");
-      select.innerHTML = `<option value="">不使用 Conda 环境</option>`;
+      renderCondaOptions([]);
       if (!state.selectedHost) return;
       select.innerHTML = `<option value="">正在读取 ${escapeHtml(state.selectedHost)} 的 Conda 环境...</option>`;
       try {
         const data = await api(`/api/remote_conda_envs?host=${encodeURIComponent(state.selectedHost)}`);
-        select.innerHTML = `<option value="">不使用 Conda 环境</option>`;
         const envs = data.envs || [];
-        select.innerHTML += envs.length
-          ? envs.map((env) => `<option value="${escapeHtml(env)}">${escapeHtml(env)}</option>`).join("")
-          : `<option value="" disabled>没有读取到 Conda 环境</option>`;
+        state.condaCache[state.selectedHost] = { envs };
+        renderCondaOptions(envs);
       } catch (err) {
-        select.innerHTML = `<option value="">不使用 Conda 环境</option><option value="">无法读取远端 Conda 环境</option>`;
+        const cached = state.condaCache[state.selectedHost];
+        if (cached && Array.isArray(cached.envs)) {
+          renderCondaOptions(cached.envs, err.message || "无法读取远端 Conda 环境");
+          return;
+        }
+        select.innerHTML = `<option value="">不使用 Conda 环境</option><option value="" disabled>无法读取远端 Conda 环境</option>`;
+        select.title = err.message || "";
       }
     }
 
@@ -756,10 +780,28 @@
         const hostParam = state.selectedHost ? `&host=${encodeURIComponent(state.selectedHost)}` : "";
         state.status = await api(force ? `/api/status?refresh=1${hostParam}` : "/api/status");
         (state.status?.results || []).forEach((item) => {
-          state.gpuCache[item.alias] = item;
+          const previous = state.gpuCache[item.alias];
+          if (item.ok || !previous?.ok || !(previous?.gpus || []).length) {
+            state.gpuCache[item.alias] = item;
+          } else {
+            state.gpuCache[item.alias] = {
+              ...previous,
+              checked_at: item.checked_at,
+              stale_error: item.error || "刷新失败",
+            };
+          }
         });
         renderGpus();
       } catch (err) {
+        const previous = state.gpuCache[state.selectedHost];
+        if (previous?.ok && (previous?.gpus || []).length) {
+          state.gpuCache[state.selectedHost] = {
+            ...previous,
+            stale_error: err.message || "刷新失败",
+          };
+          renderGpus();
+          return;
+        }
         $("gpuChoices").innerHTML = `<div class="hint">GPU 读取失败：${escapeHtml(err.message)}</div>`;
       }
     }

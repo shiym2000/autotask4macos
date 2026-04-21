@@ -40,6 +40,7 @@ REFRESH_INTERVAL = 2
 SSH_CONCURRENCY_LIMIT = 1
 SSH_TIMEOUT = 12
 CONNECT_TIMEOUT = 5
+GPU_QUERY_TIMEOUT = 30
 DEFAULT_PORT = 8765
 RUNNER_DEFAULT_PORT = 8775
 CLIENT_TIMEOUT = 180
@@ -803,13 +804,13 @@ async def start_remote_task(payload: dict[str, Any]) -> dict[str, Any]:
 
 async def list_remote_conda_envs(host: str) -> list[str]:
     remote = "bash -lc " + shlex.quote(remote_conda_command("env list"))
-    code, stdout, _ = await run_ssh(
+    code, stdout, stderr = await run_ssh(
         host,
         remote,
         timeout=SSH_TIMEOUT,
     )
     if code != 0:
-        return []
+        raise RuntimeError(stderr.strip() or stdout.strip() or "无法读取远端 Conda 环境")
     envs = []
     for line in stdout.splitlines():
         stripped = line.strip()
@@ -1048,13 +1049,17 @@ def attach_process_users(gpus: list[dict[str, Any]], users: dict[str, str]) -> N
 
 async def collect_host(host: HostConfig) -> dict[str, Any]:
     started = time.time()
-    command = [
-        *ssh_base_command(),
-        host.alias,
-        "nvidia-smi",
-        "-q",
-        "-x",
-    ]
+    nvidia_smi_command = (
+        "smi=$(command -v nvidia-smi || true); "
+        "if [ -z \"$smi\" ]; then "
+        "for p in /usr/bin/nvidia-smi /usr/local/bin/nvidia-smi /usr/local/cuda/bin/nvidia-smi; do "
+        "[ -x \"$p\" ] && smi=\"$p\" && break; "
+        "done; "
+        "fi; "
+        "if [ -z \"$smi\" ]; then echo 'nvidia-smi not found' >&2; exit 127; fi; "
+        "\"$smi\" -q -x"
+    )
+    remote = "bash -lc " + shlex.quote(nvidia_smi_command)
     base = {
         "alias": host.alias,
         "hostname": host.hostname,
@@ -1065,13 +1070,9 @@ async def collect_host(host: HostConfig) -> dict[str, Any]:
     }
 
     try:
-        code, stdout_text, stderr_text = await run_ssh_command(command, timeout=SSH_TIMEOUT)
+        code, stdout_text, stderr_text = await run_ssh(host.alias, remote, timeout=GPU_QUERY_TIMEOUT)
     except TimeoutError:
         return {**base, "ok": False, "error_type": "timeout", "error": "SSH 或 nvidia-smi 响应超时"}
-    except FileNotFoundError:
-        return {**base, "ok": False, "error_type": "ssh_missing", "error": "本机找不到 ssh 命令"}
-    except OSError as exc:
-        return {**base, "ok": False, "error_type": "ssh_error", "error": str(exc)}
 
     latency_ms = int((time.time() - started) * 1000)
     stderr_text = stderr_text.strip()
@@ -1204,7 +1205,12 @@ class GpuMonitorHandler(BaseHTTPRequestHandler):
             if host not in aliases:
                 self.send_json({"ok": False, "error": "请选择 SSH config 中已有的服务器"}, HTTPStatus.BAD_REQUEST)
                 return
-            self.send_json({"ok": True, "envs": asyncio.run(list_remote_conda_envs(host))})
+            try:
+                envs = asyncio.run(list_remote_conda_envs(host))
+            except RuntimeError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_GATEWAY)
+                return
+            self.send_json({"ok": True, "envs": envs})
         elif path == "/api/health":
             self.send_json({"ok": True, "time": time.time()})
         else:
