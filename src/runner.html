@@ -202,7 +202,6 @@
       background: var(--line);
     }
     .col-name { width: 16%; }
-    .col-refresh { width: 6%; }
     .col-host { width: 9%; }
     .col-gpus { width: 8%; }
     .col-conda { width: 11%; }
@@ -210,6 +209,7 @@
     .col-start { width: 13%; }
     .col-duration { width: 9%; }
     .col-actions { width: 18%; }
+    .col-refresh { width: 6%; }
     td:nth-child(2),
     td:nth-child(3),
     td:nth-child(4),
@@ -349,7 +349,6 @@
         <table>
           <colgroup>
             <col class="col-name">
-            <col class="col-refresh">
             <col class="col-host">
             <col class="col-gpus">
             <col class="col-conda">
@@ -357,11 +356,11 @@
             <col class="col-start">
             <col class="col-duration">
             <col class="col-actions">
+            <col class="col-refresh">
           </colgroup>
           <thead>
             <tr>
               <th data-sort="name">任务名</th>
-              <th data-sort="actions">刷新</th>
               <th data-sort="host">服务器</th>
               <th data-sort="gpus">显卡号</th>
               <th data-sort="conda_env">conda环境</th>
@@ -369,6 +368,7 @@
               <th data-sort="started_at">开始时间</th>
               <th data-sort="duration">运行时间</th>
               <th data-sort="actions">操作</th>
+              <th data-sort="actions">刷新</th>
             </tr>
           </thead>
           <tbody id="taskRows"></tbody>
@@ -679,7 +679,6 @@
         return `
           <tr>
             <td><span class="task-name" tabindex="0" data-script-path="${escapeHtml(task.script_path || "")}">${escapeHtml(task.name || "")}</span></td>
-            <td><button class="btn small" data-refresh-task="${escapeHtml(task.id)}">刷新</button></td>
             <td>${escapeHtml(task.host || "")}</td>
             <td>${escapeHtml((task.gpus || []).join(","))}</td>
             <td>${escapeHtml(task.conda_env || "不使用")}</td>
@@ -696,6 +695,7 @@
                 <button class="btn small" data-remove="${escapeHtml(task.id)}">删除任务</button>
               </div>
             </td>
+            <td><button class="btn small" data-refresh-task="${escapeHtml(task.id)}">刷新</button></td>
           </tr>
         `;
       }).join("") || `<tr><td colspan="9">${state.tasks.length ? "没有符合筛选条件的任务。" : "还没有任务。"}</td></tr>`;
@@ -704,7 +704,7 @@
 
     function enableColumnResize(table) {
       const cols = [...table.querySelectorAll("col")];
-      const minWidths = [110, 60, 76, 68, 96, 86, 116, 84, 154];
+      const minWidths = [110, 76, 68, 96, 86, 116, 84, 154, 60];
       const lockColumnWidths = () => {
         const tableWidth = table.getBoundingClientRect().width;
         table.style.width = `${tableWidth}px`;
